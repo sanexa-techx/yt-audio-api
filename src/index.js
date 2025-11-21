@@ -1,27 +1,23 @@
-const express = require("express");
-const cors = require("cors");
-const path = require("path");
+// src/index.js
+const express = require('express');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
+const path = require('path');
+const routes = require('./routes');
 
-const routes = require("./routes");
+const HLS_BASE = process.env.HLS_BASE || path.join(__dirname, '..', 'public', 'hls');
 
 function createApp() {
   const app = express();
-
-  // Middleware
-  app.use(cors());
+  app.use(helmet());
   app.use(express.json());
-
-  // API Routes
-  app.use("/", routes);
-
-  // Static HLS directory (segments + playlists)
-  app.use("/public", express.static(path.join(__dirname, "..", "public")));
-
-  // Health check
-  app.get("/health", (req, res) => {
-    res.json({ status: "ok" });
-  });
-
+  app.use(morgan('combined'));
+  app.use(rateLimit({ windowMs: 60_000, max: 60 }));
+  // Serve HLS static
+  app.use('/hls', express.static(HLS_BASE, { maxAge: '1d' }));
+  // API routes
+  app.use('/', routes);
   return app;
 }
 
