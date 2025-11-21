@@ -1,0 +1,41 @@
+# -------------------------
+# Node.js core ignores
+# -------------------------
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -------------------------
+# Environment files
+# -------------------------
+.env
+.env.local
+.env.*.local
+
+# -------------------------
+# Build output & logs
+# -------------------------
+dist/
+build/
+logs/
+*.log
+*.tmp
+
+# -------------------------
+# HLS generated output
+# -------------------------
+public/hls/*
+
+# Keep the folder but not the content
+!public/hls/.gitkeep
+
+# -------------------------
+# Editor / OS files
+# -------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
