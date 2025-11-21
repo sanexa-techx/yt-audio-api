@@ -1,5 +1,5 @@
-const { Queue } = require("bullmq");
-const Redis = require("ioredis");
+import { Queue } from "bullmq";
+import Redis from "ioredis";
 
 const REDIS_URL = process.env.REDIS_URL || "redis://127.0.0.1:6379";
 
@@ -8,7 +8,7 @@ const connection = new Redis(REDIS_URL);
 /**
  * BullMQ queue for HLS conversion jobs
  */
-const hlsQueue = new Queue("hlsQueue", {
+export const hlsQueue = new Queue("hlsQueue", {
   connection,
 });
 
@@ -16,7 +16,7 @@ const hlsQueue = new Queue("hlsQueue", {
  * Add video to HLS processing queue
  * meta = { id, bestAudioUrl, duration, title }
  */
-async function enqueueHLSJob(meta) {
+export async function enqueueHLSJob(meta) {
   if (!meta?.id || !meta?.bestAudioUrl) {
     throw new Error("Invalid meta passed to HLS queue");
   }
@@ -33,13 +33,8 @@ async function enqueueHLSJob(meta) {
         type: "exponential",
         delay: 3000,
       },
-      removeOnComplete: true,
-      removeOnFail: false,
+      removeOnComplete: true,   // delete successful jobs
+      removeOnFail: false,      // keep failed jobs for debugging
     }
   );
 }
-
-module.exports = {
-  hlsQueue,
-  enqueueHLSJob,
-};
