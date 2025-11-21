@@ -1,0 +1,19 @@
+{
+  "name": "yt-audio-api",
+  "version": "1.0.0",
+  "description": "Production-ready YouTube audio extraction API with caching, HLS, and worker queue.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "worker": "node worker.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "fluent-ffmpeg": "^2.1.2",
+    "ioredis": "^5.3.2",
+    "yt-dlp-exec": "^1.6.1",
+    "uuid": "^9.0.1"
+  }
+}
