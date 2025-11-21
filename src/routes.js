@@ -1,84 +1,66 @@
-const express = require("express");
+// src/routes.js
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const { fetchYoutubeMeta } = require('./yt-dlp');
+const { cacheGet, cacheSet } = require('./cache');
+const { enqueueHLSJob } = require('./queue');
+
+const HLS_BASE = process.env.HLS_BASE || path.join(__dirname, '..', 'public', 'hls');
+
 const router = express.Router();
 
-const cache = require("./cache");
-const { fetchYoutubeMeta, validateVideoId } = require("./utils");
-const { getHLSStream, buildHLSPlaylist } = require("./hls");
+function isValidId(id) {
+  return /^[a-zA-Z0-9_-]{8,20}$/.test(id);
+}
 
-/**
- * GET /meta/:id
- * Returns metadata + best audio URL
- */
-router.get("/meta/:id", async (req, res) => {
+// GET metadata + enqueue HLS if needed
+router.get('/audio', async (req, res) => {
   try {
-    const videoId = req.params.id;
+    const id = req.query.id;
+    if (!id || !isValidId(id)) return res.status(400).json({ error: 'Invalid or missing id' });
 
-    if (!validateVideoId(videoId)) {
-      return res.status(400).json({ error: "Invalid video ID" });
+    // metadata caching
+    const cacheKey = `meta:${id}`;
+    const cached = await cacheGet(cacheKey);
+    let meta;
+    if (cached) {
+      meta = JSON.parse(cached);
+    } else {
+      meta = await fetchYoutubeMeta(id);
+      await cacheSet(cacheKey, JSON.stringify(meta), 60 * 60 * 6);
     }
 
-    // Check cache
-    const cached = await cache.get(`meta:${videoId}`);
-    if (cached) return res.json(JSON.parse(cached));
+    // check if HLS exists
+    const indexPath = path.join(HLS_BASE, id, 'index.m3u8');
+    const hlsReady = fs.existsSync(indexPath);
 
-    // Fetch live metadata
-    const meta = await fetchYoutubeMeta(videoId);
+    if (!hlsReady) {
+      // enqueue job
+      await enqueueHLSJob(meta);
+      return res.json({
+        ...meta,
+        hls_status: 'queued',
+        hls_url: `/hls/${id}/index.m3u8`,
+        audio_url: meta.bestAudioUrl
+      });
+    }
 
-    // Cache result 6 hours
-    await cache.set(`meta:${videoId}`, JSON.stringify(meta), 60 * 60 * 6);
-
-    return res.json(meta);
+    return res.json({
+      ...meta,
+      hls_status: 'ready',
+      hls_url: `/hls/${id}/index.m3u8`,
+      audio_url: meta.bestAudioUrl
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch metadata" });
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
-/**
- * GET /stream/:id
- * Streams raw audio directly
- */
-router.get("/stream/:id", async (req, res) => {
-  try {
-    const videoId = req.params.id;
-    if (!validateVideoId(videoId)) return res.status(400).send("Invalid videoId");
+// Serve HLS static files (index.m3u8 + segments) handled by Express static in src/index.js
 
-    const stream = await getHLSStream(videoId);
-
-    res.setHeader("Content-Type", "audio/mp4");
-    res.setHeader("Transfer-Encoding", "chunked");
-
-    stream.pipe(res);
-  } catch (err) {
-    console.error("STREAM ERROR", err);
-    res.status(500).json({ error: "Stream failed" });
-  }
-});
-
-/**
- * GET /hls/:id/index.m3u8
- * Returns a static playlist (Flutter uses this)
- */
-router.get("/hls/:id/index.m3u8", (req, res) => {
-  res.setHeader("Content-Type", "application/x-mpegURL");
-  res.send(buildHLSPlaylist());
-});
-
-/**
- * GET /hls/:id/segment.ts
- * Returns an audio segment (same YouTube stream)
- */
-router.get("/hls/:id/segment.ts", async (req, res) => {
-  try {
-    const videoId = req.params.id;
-    const stream = await getHLSStream(videoId);
-
-    res.setHeader("Content-Type", "video/mp2t");
-    stream.pipe(res);
-  } catch (err) {
-    console.error("SEGMENT ERROR", err);
-    res.status(500).json({ error: "Unable to fetch segment" });
-  }
-});
+// Health
+router.get('/health', (req, res) => res.json({ ok: true }));
 
 module.exports = router;
