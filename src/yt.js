@@ -1,48 +1,84 @@
 // src/yt.js
-import ytdl from "@distube/ytdl-core";
+import { YTDlpWrap } from "yt-dlp-wrap";
+import pRetry from "p-retry";
 
-// Pick best audio-only format
+// yt-dlp instance (auto-downloads binary on Render/Vercel)
+const ytDlp = new YTDlpWrap();
+
+/**
+ * Select the highest bitrate audio-only format
+ */
 function selectBestAudioFormat(formats) {
-  const audioFormats = ytdl.filterFormats(formats, "audioonly");
+  const audioFormats = formats.filter(
+    (f) =>
+      f.acodec && f.acodec !== "none" &&
+      (!f.vcodec || f.vcodec === "none") // audio-only
+  );
 
-  if (!audioFormats || audioFormats.length === 0) {
-    throw new Error("No audio formats available.");
+  if (audioFormats.length === 0) {
+    throw new Error("No audio-only formats available.");
   }
 
-  // Sort highest bitrate first
-  return audioFormats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+  return audioFormats.sort(
+    (a, b) => (b.abr || b.tbr || 0) - (a.abr || a.tbr || 0)
+  )[0];
 }
 
-// Fetch metadata + best audio URL
+/**
+ * Fetch metadata + best audio URL using yt-dlp-wrap
+ */
 export async function getYouTubeInfo(videoId) {
-  try {
-    const info = await ytdl.getInfo(videoId);
-    const format = selectBestAudioFormat(info.formats);
+  const fetchFn = async () => {
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+    const args = [
+      url,
+      "--dump-single-json",
+      "--no-warnings",
+      "--skip-download",
+      "--prefer-free-formats",
+    ];
+
+    const raw = await ytDlp.execPromise(args);
+    const info = JSON.parse(raw);
+
+    const bestAudio = selectBestAudioFormat(info.formats);
 
     return {
-      id: videoId,
-      title: info.videoDetails.title,
-      author: info.videoDetails.author?.name || "Unknown",
-      duration: parseInt(info.videoDetails.lengthSeconds),
+      id: info.id,
+      title: info.title,
+      author: info.uploader || info.channel || "Unknown",
+      duration: info.duration || null,
       thumbnail:
-        info.videoDetails.thumbnails?.[info.videoDetails.thumbnails.length - 1]
-          ?.url || null,
-      audioUrl: format.url,
-      mimeType: format.mimeType || "audio/webm",
-      container: format.container || "webm",
-      bitrate: format.bitrate || null,
-    };
-  } catch (err) {
-    console.error("❌ YouTube extraction failed:", err);
-    throw new Error("Failed to extract YouTube audio");
-  }
-}
+        info.thumbnail ||
+        info.thumbnails?.[info.thumbnails.length - 1]?.url ||
+        null,
 
-// Direct readable stream (used for /stream/:id)
-export function getAudioStream(videoId) {
-  return ytdl(videoId, {
-    filter: "audioonly",
-    quality: "highestaudio",
-    highWaterMark: 1 << 25, // High buffer for stability
+      // best audio URL
+      audioUrl: bestAudio.url,
+      mimeType: bestAudio.ext ? `audio/${bestAudio.ext}` : "audio/mpeg",
+      container: bestAudio.ext || "m4a",
+      bitrate: bestAudio.abr || bestAudio.tbr || null,
+    };
+  };
+
+  return await pRetry(fetchFn, {
+    retries: 2,
   });
 }
+
+/**
+ * Direct streaming (used for `/stream/:id`)
+ * yt-dlp can output directly to stdout for streaming
+ */
+export function getAudioStream(videoId) {
+  const url = `https://www.youtube.com/watch?v=${videoId}`;
+
+  const args = [
+    url,
+    "-f", "bestaudio",
+    "-o", "-", // output to stdout
+  ];
+
+  return ytDlp.exec(args); // returns Readable stream
+                      }
